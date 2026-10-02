@@ -553,6 +553,8 @@ const [anomalyResult, setAnomalyResult] = useState(null);
 const [anomalyError, setAnomalyError] = useState("");
 const [modelLoading, setModelLoading] = useState(false);
 const [modelResult, setModelResult] = useState(null);
+const [unifiedForecastResult, setUnifiedForecastResult] =
+  useState(null);
 const [modelError, setModelError] = useState("");
 const [selectedModel, setSelectedModel] = useState("tesm");
 const [forecastHorizon, setForecastHorizon] = useState(12);
@@ -601,6 +603,178 @@ const modelChartData = useMemo(() => {
 
   return [...historical, ...forecast];
 }, [modelResult]);
+
+const unifiedModelComparison = useMemo(() => {
+  const results = unifiedForecastResult?.results;
+
+  if (!results || typeof results !== "object") {
+    return [];
+  }
+
+  const finalTestRows = Array.isArray(validationResult?.final_test)
+    ? validationResult.final_test
+    : [];
+
+  const walkForwardRows = Array.isArray(validationResult?.walk_forward)
+    ? validationResult.walk_forward
+    : [];
+
+  const normalize = (value) =>
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ");
+
+  /*
+   * IMPORTANT:
+   * The unified forecast API and validation API use slightly
+   * different display names. Match by MODEL KEY, not by the
+   * complete display name.
+   */
+  const modelAliases = {
+    tesm: [
+      "tesm",
+      "holt winters",
+      "holt winter",
+      "tesm / holt winters",
+      "holt winters / tesm",
+    ],
+
+    sarima: [
+      "sarima",
+      "sarima paper specification",
+      "sarima — paper specification",
+      "sarima - paper specification",
+    ],
+
+    sarimax: [
+      "sarimax",
+      "sarimax cpi",
+      "sarimax + cpi",
+      "sarimax cpi diagnostic",
+      "sarimax + cpi diagnostic",
+      "sarimax + cpi — diagnostic",
+    ],
+
+    random_forest: [
+      "random forest",
+      "random_forest",
+    ],
+
+    xgboost: [
+      "xgboost",
+      "xg boost",
+    ],
+
+    lstm: [
+      "lstm",
+    ],
+
+    gru: [
+      "gru",
+    ],
+  };
+
+  const matchesModel = (rowModel, modelKey) => {
+    const normalizedRow = normalize(rowModel);
+    const aliases = modelAliases[modelKey] || [modelKey];
+
+    return aliases.some((alias) => {
+      const normalizedAlias = normalize(alias);
+
+      return (
+        normalizedRow === normalizedAlias ||
+        normalizedRow.includes(normalizedAlias) ||
+        normalizedAlias.includes(normalizedRow)
+      );
+    });
+  };
+
+  const findValidationRow = (rows, modelKey) => {
+    return (
+      rows.find((row) =>
+        matchesModel(row?.model, modelKey)
+      ) || null
+    );
+  };
+
+  const numericValue = (value) => {
+    const number = Number(value);
+
+    return Number.isFinite(number)
+      ? number
+      : null;
+  };
+
+  return Object.entries(results)
+    .map(([modelKey, result]) => {
+      if (!result || result.success === false) {
+        return null;
+      }
+
+      const model = result.model || {};
+
+      const finalTest = findValidationRow(
+        finalTestRows,
+        modelKey
+      );
+
+      const walkForward = findValidationRow(
+        walkForwardRows,
+        modelKey
+      );
+
+      return {
+        key: modelKey,
+
+        name:
+          model.name ||
+          modelKey.replace(/_/g, " "),
+
+        walkForwardMae: numericValue(
+          walkForward?.mae
+        ),
+
+        walkForwardRmse: numericValue(
+          walkForward?.rmse
+        ),
+
+        walkForwardMape: numericValue(
+          walkForward?.mape
+        ),
+
+        finalTestMae: numericValue(
+          finalTest?.mae
+        ),
+
+        finalTestRmse: numericValue(
+          finalTest?.rmse
+        ),
+
+        finalTestMape: numericValue(
+          finalTest?.mape
+        ),
+
+        aic: numericValue(
+          model.aic
+        ),
+
+        bic: numericValue(
+          model.bic
+        ),
+
+        forecastCount:
+          Array.isArray(result.forecast)
+            ? result.forecast.length
+            : 0,
+      };
+    })
+    .filter(Boolean);
+}, [
+  unifiedForecastResult,
+  validationResult,
+]);
 
 const [toast, setToast] = useState(null);
 
@@ -980,7 +1154,9 @@ async function handleUnifiedForecast(modelsToRun = [selectedModel]) {
   const currentDatasetId = activeDatasetId || datasetId;
 
   if (!currentDatasetId) {
-    throw new Error("Please upload a dataset before running a forecasting model.");
+    throw new Error(
+      "Please upload a dataset before running a forecasting model."
+    );
   }
 
   const normalizedModels = Array.isArray(modelsToRun)
@@ -1007,7 +1183,7 @@ async function handleUnifiedForecast(modelsToRun = [selectedModel]) {
         models: normalizedModels,
         exog_column: modelConfig.exog_column || null,
       }),
-    },
+    }
   );
 
   const result = await response.json().catch(() => ({}));
@@ -1019,7 +1195,7 @@ async function handleUnifiedForecast(modelsToRun = [selectedModel]) {
     throw new Error(
       firstError ||
         result.error ||
-        "The unified forecasting service could not complete the forecast.",
+        "The unified forecasting service could not complete the forecast."
     );
   }
 
@@ -1033,26 +1209,73 @@ async function handleSelectedModelForecast() {
 
   try {
     const result = await handleUnifiedForecast([selectedModel]);
+    setUnifiedForecastResult(result);
+
     const selectedResult = result.results?.[selectedModel];
 
     if (!selectedResult?.success) {
       throw new Error(
         result.errors?.[selectedModel] ||
-          `${getModelDisplayName(selectedModel)} did not return a valid forecast.`,
+          `${getModelDisplayName(selectedModel)} did not return a valid forecast.`
       );
     }
 
     setModelResult(selectedResult);
 
     showToast(
-      `${getModelDisplayName(selectedModel)} forecast completed successfully.`,
+      `${getModelDisplayName(selectedModel)} forecast completed successfully.`
     );
   } catch (error) {
     console.error(`${selectedModel} forecast error:`, error);
 
     setModelError(
       error.message ||
-        `Unable to run the ${getModelDisplayName(selectedModel)} model.`,
+        `Unable to run the ${getModelDisplayName(selectedModel)} model.`
+    );
+  } finally {
+    setModelLoading(false);
+  }
+}
+
+async function handleAllModelsForecast() {
+  setModelLoading(true);
+  setModelError("");
+
+  try {
+    // SARIMAX is kept out of this batch because the current unified
+    // backend contract requires an explicit exogenous column for it.
+    const allModels = [
+      "tesm",
+      "sarima",
+      "random_forest",
+      "xgboost",
+      "lstm",
+      "gru",
+    ];
+
+    const result = await handleUnifiedForecast(allModels);
+
+    setUnifiedForecastResult(result);
+
+    const successfulModels = Object.entries(result.results || {})
+      .filter(([, modelResult]) => modelResult?.success)
+      .map(([modelKey]) => modelKey);
+
+    if (!successfulModels.length) {
+      throw new Error(
+        "The unified forecasting service did not return a successful result for any model."
+      );
+    }
+
+    showToast(
+      `${successfulModels.length} forecasting models completed successfully.`
+    );
+  } catch (error) {
+    console.error("All-model forecast error:", error);
+
+    setModelError(
+      error.message ||
+        "Unable to run the unified forecast for all models."
     );
   } finally {
     setModelLoading(false);
@@ -5537,7 +5760,16 @@ function resetDataset() {
         </div>
       )}
 
-      <div className="mt-6 flex justify-end">
+      <div className="mt-6 flex flex-wrap justify-end gap-3">
+        <button
+          type="button"
+          onClick={handleAllModelsForecast}
+          disabled={modelLoading || !datasetLoaded}
+          className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-6 py-3 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {modelLoading ? "Running Models..." : "Run All Models"}
+        </button>
+
         <button
           type="button"
           onClick={handleSelectedModelForecast}
@@ -5556,6 +5788,107 @@ function resetDataset() {
         </div>
       )}
     </div>
+
+    {unifiedModelComparison.length > 0 && (
+      <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="mb-6">
+          <p className="text-xs font-bold tracking-[0.18em] text-red-600">
+            MODEL COMPARISON
+          </p>
+          <h2 className="mt-2 text-xl font-bold text-gray-900">
+            Unified Forecasting Results
+          </h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Live unified forecasts are combined with the dataset-specific walk-forward and final-test validation metrics.
+          </p>
+        </div>
+
+        <div className="mb-5 rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Walk-Forward
+              </p>
+              <p className="mt-1 text-sm font-medium text-gray-900">
+                {validationResult?.methodology?.walk_forward_origins?.length || 0} rolling origins
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Final Test
+              </p>
+              <p className="mt-1 text-sm font-medium text-gray-900">
+                {validationResult?.methodology?.test_period ||
+                  validationResult?.methodology?.final_test_period ||
+                  "Chronological holdout"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Forecast Horizon
+              </p>
+              <p className="mt-1 text-sm font-medium text-gray-900">
+                {forecastHorizon} months
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-200 text-left">
+                {['Model','WF MAE','WF RMSE','WF MAPE','Final MAE','Final RMSE','Final MAPE','AIC','BIC','Forecast Points'].map((heading) => (
+                  <th key={heading} className="px-4 py-3 font-semibold text-gray-600">
+                    {heading}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {unifiedModelComparison.map((model) => (
+                <tr key={model.key} className="border-b border-gray-100">
+                  <td className="px-4 py-3 font-medium text-gray-900">
+                    {model.name}
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {model.walkForwardMae !== null ? model.walkForwardMae.toFixed(3) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {model.walkForwardRmse !== null ? model.walkForwardRmse.toFixed(3) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {model.walkForwardMape !== null ? `${model.walkForwardMape.toFixed(3)}%` : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {model.finalTestMae !== null ? model.finalTestMae.toFixed(3) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {model.finalTestRmse !== null ? model.finalTestRmse.toFixed(3) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {model.finalTestMape !== null ? `${model.finalTestMape.toFixed(3)}%` : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {model.aic !== null ? model.aic.toFixed(3) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {model.bic !== null ? model.bic.toFixed(3) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {model.forecastCount || "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <p className="mt-4 text-xs leading-5 text-gray-500">
+          SARIMAX remains in the validation comparison when validation data is available; the Run All Models batch intentionally uses the six-model unified request because the current unified SARIMAX contract requires an explicit external-variable column.
+        </p>
+      </div>
+    )}
 
     {modelResult && (
       <div className="space-y-6">
@@ -7675,7 +8008,7 @@ function resetDataset() {
             </p>
             <p className="mt-2 text-[11px] leading-5 text-red-600">
               Explainability is connected to the ForecastIQ attribution service.
-              Random Forest and XGBoost can display SHAP/native attribution; LSTM and GRU can display dataset-specific lag attribution.
+              Random Forest and XGBoost can display saved SHAP feature attribution.
             </p>
           </div>
         </div>
@@ -7848,6 +8181,16 @@ function resetDataset() {
             })
           );
 
+      const explainMethod =
+        explainResult?.method ||
+        "Model-specific attribution";
+
+      const explainParameters =
+        explainResult?.parameters || {};
+
+      const explainParameterEntries =
+        Object.entries(explainParameters);
+
       const normalizedFeatures = featureRows
         .map((item, index) => ({
           feature:
@@ -7878,13 +8221,6 @@ function resetDataset() {
         1
       );
 
-      const explainParameters =
-        explainResult?.parameters || {};
-
-      const parameterEntries = Object.entries(
-        explainParameters
-      ).filter(([key]) => key !== "explanation_method");
-
       return (
         <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
           <div className="mb-5">
@@ -7895,54 +8231,40 @@ function resetDataset() {
               Model drivers
             </h3>
             <p className="mt-1 text-sm text-gray-500">
-              Feature importance or SHAP-style attribution returned by the
-              active model, when available.
+              Dataset-specific attribution for the selected forecasting model.
             </p>
-          </div>
 
-          {parameterEntries.length > 0 && (
-            <div className="mb-6 rounded-2xl border border-red-100 bg-red-50/40 p-5">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-[10px] font-bold tracking-[0.15em] text-red-600">
-                    MODEL PARAMETERS
-                  </p>
-                  <h4 className="mt-1 text-sm font-bold text-gray-900">
-                    Sequence / model configuration
-                  </h4>
-                </div>
-                {explainParameters.explanation_method && (
-                  <span className="rounded-full bg-white px-3 py-1 text-[10px] font-semibold text-red-700 shadow-sm">
-                    {String(explainParameters.explanation_method)}
-                  </span>
-                )}
+            <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-gray-700">
+                  Method
+                </span>
+                <span className="text-xs font-semibold text-gray-800">
+                  {explainMethod}
+                </span>
               </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {parameterEntries.map(([key, value]) => (
-                  <div key={key} className="rounded-xl bg-white p-3">
-                    <p className="text-[9px] font-bold tracking-wider text-gray-400">
-                      {key.replaceAll("_", " ").toUpperCase()}
-                    </p>
-                    <p className="mt-2 text-xs font-bold text-gray-900">
+              {explainParameterEntries.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {explainParameterEntries.map(([key, value]) => (
+                    <span
+                      key={key}
+                      className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-[10px] text-gray-600"
+                    >
+                      <span className="font-bold text-gray-800">
+                        {key.replaceAll("_", " ")}:
+                      </span>{" "}
                       {Array.isArray(value)
                         ? value.join(", ")
-                        : typeof value === "number"
-                        ? Number(value).toFixed(4)
+                        : typeof value === "object" && value !== null
+                        ? JSON.stringify(value)
                         : String(value)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-
-              {explainParameters.lag_definition && (
-                <p className="mt-4 text-[11px] leading-5 text-gray-500">
-                  <span className="font-semibold text-gray-700">Lag definition:</span>{" "}
-                  {String(explainParameters.lag_definition)}
-                </p>
+                    </span>
+                  ))}
+                </div>
               )}
             </div>
-          )}
+          </div>
 
           {normalizedFeatures.length > 0 ? (
             <div className="space-y-3">

@@ -3684,7 +3684,148 @@ def validation():
                         "error": str(exc),
                     }
                 )
+        # ========================================================
+        # WALK-FORWARD / ROLLING-ORIGIN VALIDATION
+        # ========================================================
+        # Keep the final chronological test period untouched.
+        # Walk-forward validation uses only the development data.
 
+        development_values = values.iloc[:-test_size].reset_index(
+            drop=True
+        )
+
+        development_dates = dates.iloc[:-test_size].reset_index(
+            drop=True
+        )
+
+        forecast_horizon = 12
+
+        walk_forward_origins = [
+            96,
+            108,
+            120,
+            132,
+        ]
+
+        walk_forward_results = []
+
+        for model_name in model_names:
+            origin_results = []
+
+            for origin in walk_forward_origins:
+                validation_end = origin + forecast_horizon
+
+                if validation_end > len(development_values):
+                    continue
+
+                origin_train = development_values.iloc[
+                    :origin
+                ].reset_index(drop=True)
+
+                origin_test = development_values.iloc[
+                    origin:validation_end
+                ].reset_index(drop=True)
+
+                try:
+                    origin_result = evaluate_model(
+                        model_name,
+                        origin_train,
+                        origin_test,
+                    )
+
+                    origin_result["origin"] = int(origin)
+
+                    origin_result["validation_start"] = (
+                        development_dates.iloc[origin].strftime(
+                            "%Y-%m-%d"
+                        )
+                    )
+
+                    origin_result["validation_end"] = (
+                        development_dates.iloc[
+                            validation_end - 1
+                        ].strftime("%Y-%m-%d")
+                    )
+
+                    origin_results.append(origin_result)
+
+                except Exception as exc:
+                    app.logger.warning(
+                        "Walk-forward validation failed for "
+                        "%s at origin %s: %s",
+                        model_name,
+                        origin,
+                        exc,
+                    )
+
+            if origin_results:
+                metric_fields = [
+                    "mae",
+                    "rmse",
+                    "mape",
+                    "smape",
+                ]
+
+                aggregated = {
+                    "model": model_name,
+                    "status": "COMPLETED",
+                    "origins": len(origin_results),
+                    "origin_observations": [
+                        item["origin"]
+                        for item in origin_results
+                    ],
+                    "validation_periods": [
+                        {
+                            "start": item["validation_start"],
+                            "end": item["validation_end"],
+                        }
+                        for item in origin_results
+                    ],
+                }
+
+                for metric in metric_fields:
+                    metric_values_for_model = [
+                        float(item[metric])
+                        for item in origin_results
+                        if item.get(metric) is not None
+                        and np.isfinite(
+                            float(item[metric])
+                        )
+                    ]
+
+                    aggregated[metric] = (
+                        float(
+                            np.mean(
+                                metric_values_for_model
+                            )
+                        )
+                        if metric_values_for_model
+                        else None
+                    )
+
+                # AIC is fit-specific and is therefore not
+                # averaged across rolling-origin fits.
+                aggregated["aic"] = None
+
+                walk_forward_results.append(
+                    aggregated
+                )
+
+            else:
+                walk_forward_results.append(
+                    {
+                        "model": model_name,
+                        "mae": None,
+                        "rmse": None,
+                        "mape": None,
+                        "smape": None,
+                        "aic": None,
+                        "status": "NOT_AVAILABLE",
+                        "origins": 0,
+                        "origin_observations": [],
+                        "validation_periods": [],
+                    }
+                )
         test_start = dates.iloc[-test_size].strftime(
             "%Y-%m-%d"
         )
@@ -3702,7 +3843,8 @@ def validation():
 
         methodology = {
             "validation": (
-                "Dataset-specific chronological holdout backtest"
+                "Dataset-specific walk-forward / rolling-origin "
+                "validation with a final chronological holdout"
             ),
             "frequency": (
                 dataset_profile.get("frequency")
@@ -3716,16 +3858,29 @@ def validation():
                 f"{test_start} – {test_end}"
             ),
             "shuffle": False,
+            "walk_forward_horizon": int(forecast_horizon),
+            "walk_forward_origins": [
+                int(origin)
+                for origin in walk_forward_origins
+            ],
+            "walk_forward_completed_models": int(
+                sum(
+                    1
+                    for item in walk_forward_results
+                    if item.get("status") == "COMPLETED"
+                )
+            ),
             "notes": [
                 "All validation metrics are recalculated from the currently active dataset.",
                 "The chronological holdout is excluded from model fitting.",
+                "Walk-forward validation uses multiple historical rolling origins from the development data.",
+                "The final test period is not used during walk-forward validation.",
                 "Lower MAE, RMSE and MAPE indicate lower error within this evaluated dataset and holdout period.",
                 "AIC applies to likelihood-based statistical models.",
                 "The SARIMAX + CPI diagnostic does not reuse the research CPI series for arbitrary uploaded datasets.",
                 "Results are dataset-specific and are not universal performance guarantees.",
             ],
         }
-
         # The frontend already expects both arrays. Keep the contract stable,
         # but make both sections point to the current dataset's calculated
         # evidence instead of the previous hard-coded Food Products metrics.
@@ -3767,7 +3922,7 @@ def validation():
                         "test_observations": int(len(test)),
                     },
                     "methodology": methodology,
-                    "walk_forward": successful_results,
+                    "walk_forward": walk_forward_results,
                     "final_test": results,
                 }
             )
