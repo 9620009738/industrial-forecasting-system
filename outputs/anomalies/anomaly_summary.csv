@@ -1,0 +1,5 @@
+sector,observations,statistical_anomalies,isolation_forest_anomalies,combined_anomalies
+Basic Metals,156,10,8,12
+Chemicals and Chemical Products,156,26,8,26
+Motor Vehicles,156,14,8,14
+Textiles,156,29,8,29

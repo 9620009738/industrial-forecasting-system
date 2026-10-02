@@ -1,0 +1,13 @@
+feature,importance,feature_type,lag,direction
+lag_12,0.23249259591102606,neural-network input lag,12,positive
+lag_11,0.18985485732555393,neural-network input lag,11,positive
+lag_10,0.14177682399749758,neural-network input lag,10,positive
+lag_9,0.09389994442462923,neural-network input lag,9,positive
+lag_2,0.08321365118026736,neural-network input lag,2,positive
+lag_1,0.077519628405571,neural-network input lag,1,positive
+lag_3,0.062202227115631115,neural-network input lag,3,positive
+lag_8,0.052686282992362984,neural-network input lag,8,positive
+lag_4,0.03403841555118561,neural-network input lag,4,positive
+lag_7,0.023553276062011724,neural-network input lag,7,positive
+lag_5,0.014371064305305483,neural-network input lag,5,positive
+lag_6,0.010247412323951724,neural-network input lag,6,positive

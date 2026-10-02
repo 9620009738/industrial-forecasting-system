@@ -1,0 +1,8 @@
+metric,value
+observations,147.0
+iip_cpi_correlation,0.5481873599100303
+iip_cpi_change_correlation,-0.07944631817071206
+cpi_adf_pvalue,0.9985570671870899
+cpi_difference_adf_pvalue,0.03062404349161478
+training_observations,135.0
+test_observations,12.0

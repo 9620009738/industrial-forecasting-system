@@ -1,0 +1,17 @@
+feature,mean_absolute_shap
+lag_12,7.302621
+lag_1,6.4547057
+month_cos,2.3372474
+year_number,1.8016671
+month_number,1.3599417
+rolling_mean_12,1.104147
+lag_2,0.6604721
+lag_3,0.5988977
+rolling_std_3,0.5732932
+lag_6,0.52058375
+rolling_mean_3,0.5102028
+rolling_mean_6,0.44463477
+rolling_std_6,0.40286803
+rolling_std_12,0.3353926
+month_sin,0.29609874
+quarter,0.10591803
